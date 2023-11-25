@@ -388,6 +388,7 @@ namespace WinFormsApp2
         /// <returns></returns>
         protected override bool ProcessKeyEventArgs(ref Message m)
         {
+
             switch (m.Msg)
             {
                 case WM_KEYDOWN:
@@ -407,11 +408,14 @@ namespace WinFormsApp2
                             {
                                 this._text = this._text.Remove(_selectionStart, _selectionLength);
                                 _cursorPosition -= _selectionLength;
-                                Invalidate();
+                                //Invalidate();
+                                Refresh();//即刻重绘
+                                ClearSelected();
+                                ClearSelected();//当选中文本后，再次输入时进行清空被选中内容
                             }
-                            else if (_cursorPosition > 0)
+                            else if (!string.IsNullOrEmpty(this._text))
                             {
-                                this._text = this._text.Remove(_cursorPosition - 1, 1);
+                                this._text = this._text.Remove(this._text.Length - 1, 1);
                                 _cursorPosition--;
                                 Invalidate();
                             }
@@ -421,7 +425,9 @@ namespace WinFormsApp2
                             {
                                 this._text = this._text.Remove(_selectionStart, _selectionLength);
                                 _cursorPosition -= _selectionLength;
-                                Invalidate();
+                                //Invalidate();
+                                Refresh();//即刻重绘
+                                ClearSelected();//当选中文本后，再次输入时进行清空被选中内容
                             }
                             else if (_cursorPosition < this._text.Length)
                             {
@@ -468,6 +474,7 @@ namespace WinFormsApp2
                     return true;
                 default: break;
             }
+
             return base.ProcessKeyEventArgs(ref m); // 调用基类的处理方法处理其他消息或未处理的消息。这样，例如Tab键等仍然可以正常工作。
         }
 
@@ -576,6 +583,14 @@ namespace WinFormsApp2
             }
             // 如果x超过了文本的最后位置，返回文本的长度  
             return Text.Length;
+        }
+        /// <summary>
+        /// 初始化选中
+        /// </summary>
+        private void ClearSelected() {
+            _firstSelectionStart = -1;
+            _selectionStart = 0;
+            _selectionLength = 0;
         }
         #endregion
     }
