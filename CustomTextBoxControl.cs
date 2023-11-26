@@ -21,9 +21,37 @@ namespace WinFormsApp2
         /// </summary>
         private string _lastDrawText = string.Empty;
         /// <summary>
-        /// 光标位置
+        /// 光标所在文本中的索引
         /// </summary>
-        private int _cursorPosition = 0;
+        private int _cursorByTxtIndex;
+        /// <summary>
+        /// //光标所处占文本长度的比例
+        /// </summary>
+        private double _cursorTxtIndexScale=0;
+        /// <summary>
+        /// 输入文本最后一个字符长度
+        /// </summary>
+        private int _lastOneStrWidth = 0;
+        /// <summary>
+        /// 输入文本第一个字符长度
+        /// </summary>
+        private int _firstOneStrWidth = 0;
+        private int _cursorTextWidth = 0;
+        public int CursorByTxtIndex
+        {
+            get => _cursorByTxtIndex;
+            private set
+            {
+                _cursorByTxtIndex = value;
+                _cursorTxtIndexScale =(double)value / (double)this._text.Length;
+                double factor = Math.Pow(10, 2);
+                _cursorTxtIndexScale = Math.Ceiling(_cursorTxtIndexScale * factor) / factor;
+                _firstOneStrWidth = this._text.Length > 0 ? TextRenderer.MeasureText(this._text.Substring(0, 1), Font).Width : 0;
+                _lastOneStrWidth = this._text.Length > 2 ? TextRenderer.MeasureText(this._text.Substring(this._text.Length - 2, 1), Font).Width : 0;
+                if(!string.IsNullOrEmpty(this._text))
+                _cursorTextWidth = (TextRenderer.MeasureText(this._text.Substring(value <= 1 ? 0 : value== this._text.Length?value-1:value, 1), Font)).Width;
+            }
+        }
         /// <summary>
         /// 光标是否可见
         /// </summary>
@@ -134,12 +162,23 @@ namespace WinFormsApp2
 
         #region Windows相关处理消息
         // 参考 https://blog.csdn.net/weixin_33709219/article/details/93162243
+        //参考 https://learn.microsoft.com/zh-cn/windows/win32/inputdev/
         /// <summary>
-        /// 捕获按键
+        /// 按下非系统键时，使用键盘焦点发布到窗口。 非系统键是在未按下 Alt 键时按下的键。
         /// </summary>
         private const int WM_KEYDOWN = 0x100;
         /// <summary>
-        /// 捕获字符输入(未经输入法直接送入程序中的字符会响应的消息)
+        /// 释放非系统键时，使用键盘焦点发布到窗口。 非系统键是在 未 按下 Alt 键时按下的键，或在窗口具有键盘焦点时按下的键盘键。
+        /// </summary>
+        private const int WM_KEYUP = 0x0101;
+        /// <summary>
+        /// 当用户按下 F10 键 (激活菜单栏) 或按住 Alt 键，然后按另一个键时，发布到具有键盘焦点的窗口。
+        /// 当当前没有窗口具有键盘焦点时，也会发生这种情况;在这种情况下， 会将WM_SYSKEYDOWN 消息发送到活动窗口。 
+        /// 接收消息的窗口可以通过检查 lParam 参数中的上下文代码来区分这两个上下文。
+        /// </summary>
+        private const int WM_SYSKEYDOWN = 0x0104;
+        /// <summary>
+        /// 当 TranslateMessage 函数翻译WM_KEYDOWN消息时，使用键盘焦点发布到窗口。 WM_CHAR消息包含按下的键的字符代码。
         /// </summary>
         private const int WM_CHAR = 0x102;
         //private const int WM_CHAR = 0x0102;
@@ -278,6 +317,7 @@ namespace WinFormsApp2
                 Focus(); // 给予焦点
             }
             base.OnMouseDown(e);
+
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
@@ -300,6 +340,31 @@ namespace WinFormsApp2
                 UpdateSelection(e.X);
             }
             base.OnMouseMove(e);
+        }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            switch (keyData)
+            {
+                case Keys.Up:
+
+                    return true; // 阻止键的默认处理  
+                case Keys.Down:
+
+                    return true; // 阻止键的默认处理  
+                case Keys.Left:
+                    if (CursorByTxtIndex > 0) CursorByTxtIndex--;
+                    Invalidate();
+                    return true; // 阻止键的默认处理  
+                case Keys.Right:
+                    if (CursorByTxtIndex < this._text.Length) CursorByTxtIndex++;
+                    Invalidate();
+                    return true; // 阻止键的默认处理  
+                default:
+
+                    break;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
         #endregion
 
@@ -362,6 +427,7 @@ namespace WinFormsApp2
                 string selectedText = this._text.Substring(_selectionStart, _selectionLength);
                 SizeF selectedTextSize = e.Graphics.MeasureString(selectedText, Font);
                 float selectedX = e.Graphics.MeasureString(this._text.Substring(0, _selectionStart), Font).Width;
+
                 RectangleF selectionRectangle = new RectangleF(selectedX, Height / 2 - sizeText.Height / 2, selectedTextSize.Width, sizeText.Height);
                 using (SolidBrush brush = new SolidBrush(Color.FromArgb(128, Color.LightBlue)))
                     e.Graphics.FillRectangle(Brushes.LightBlue, selectionRectangle);
@@ -369,18 +435,102 @@ namespace WinFormsApp2
             // 绘制文本内容  
             using (SolidBrush textBrush = new SolidBrush(ForeColor))
             {
-                e.Graphics.DrawString(this._text, Font, textBrush, (new Point() { X = 0, Y = Height / 2 - sizeText.Height / 2 }));
+                int textX = GetTextX(sizeText);
+
+                e.Graphics.DrawString(this._text, Font, textBrush, (new Point() { X = textX, Y = Height / 2 - sizeText.Height / 2 }));
                 this._lastDrawText = this._text;
             }
 
             // 绘制光标  
             if (_isCursorVisible && this.Focused)
             {
-                int cursorX = sizeText.Width;
+#if DEBUG
+                Debug.WriteLine("光标：" + CursorByTxtIndex.ToString());
+#endif
+                string _cpText = this._text.Substring(0, CursorByTxtIndex);
+                SizeF _cpTextSize = e.Graphics.MeasureString(_cpText, Font);
+                float _cpX = e.Graphics.MeasureString(this._text.Substring(0, CursorByTxtIndex), Font).Width;
+                #region 存在问题，临时办法
+                //if (_cursorPosition < 2)
+                //    _cpX++;
+                //else if (_cursorPosition == 2)
+                //    _cpX -= e.Graphics.MeasureString(this._text.Substring(_cursorPosition - 2, 1), Font).Width / 4;
+                //else if (_cursorPosition>=3)
+                //    _cpX -= e.Graphics.MeasureString(this._text.Substring(_cursorPosition-3,2 ), Font).Width/4;
+                #endregion
+                _cpX = GetCursorX();
                 using (Pen cursorPen = new Pen(ForeColor, 1))
-                    e.Graphics.DrawLine(cursorPen, cursorX, Height / 2 - sizeText.Height / 2, cursorX, Height / 2 + sizeText.Height / 2);
+                    e.Graphics.DrawLine(cursorPen, _cpX, Height / 2 - sizeText.Height / 2, _cpX, Height / 2 + sizeText.Height / 2);
             }
         }
+        /// <summary>
+        /// 获取文本X坐标
+        /// </summary>
+        /// <param name="sizeText"></param>
+        /// <returns></returns>
+        private int GetTextX(Size? sizeText)
+        {
+            int resVal = 0;
+            if (sizeText == null)
+                sizeText = GetMeasureText();
+            if (sizeText?.Width > Width)
+                if (CursorByTxtIndex == this._text.Length)
+                {
+                    if (sizeText?.Width < Width)
+                        resVal = 0;
+                    else
+                        resVal -= (sizeText?.Width ?? 0) - Width;
+                }
+                else
+                {
+                    if (CursorByTxtIndex > 1)//此时光标位于非最左侧
+                    {
+                        resVal -= (sizeText?.Width ?? 0) - Width;
+                    }
+                }
+            return resVal;
+        }
+
+        private int cursorCurrentX = 0;
+        private int cursorCurrentLen = 0;
+        private int _cursorByTxtIndexOld = 0;
+
+
+
+        private int GetCursorX()
+        {
+            int resVal = 2;
+            cursorCurrentLen = string.IsNullOrEmpty(this._text) ? 0 : this._text.Length;
+            Size sizeText = GetMeasureText();
+            int lastTwoStrWidth = this._text.Length > 3 ? TextRenderer.MeasureText(this._text.Substring(this._text.Length - 3, 2), Font).Width : 0;
+            //double svgTextWidth = sizeText.Width / this._text.Length;
+            if (CursorByTxtIndex == this._text.Length)
+            {
+                if (sizeText.Width < Width)
+                    resVal = string.IsNullOrEmpty(this._text) ? 2 : (int)Math.Ceiling(sizeText.Width * _cursorTxtIndexScale);
+                else
+                    resVal = (int)((Width - _lastOneStrWidth / 4) * _cursorTxtIndexScale) ;
+            }
+            else
+            {
+                if (CursorByTxtIndex < this._text.Length)
+                {
+                    if (sizeText.Width > Width)
+                    {
+                        resVal = (int)Math.Ceiling((sizeText.Width - GetTextX(null)) * _cursorTxtIndexScale);
+                    }
+                    else
+                    {
+                        int subStartIndex = CursorByTxtIndex,
+                            subLen = this._text.Length - subStartIndex,
+                            cursorTextWidth = (TextRenderer.MeasureText(this._text.Substring(subStartIndex, subLen), Font)).Width;
+                        resVal = sizeText.Width - cursorTextWidth;
+                    }
+                }
+            }
+            return resVal;
+        }
+
         /// <summary>
         /// 处理键盘输入，实现文本输入和光标移动等功能  
         /// </summary>
@@ -388,35 +538,56 @@ namespace WinFormsApp2
         /// <returns></returns>
         protected override bool ProcessKeyEventArgs(ref Message m)
         {
-
+            Keys keyCode;
             switch (m.Msg)
             {
-                case WM_KEYDOWN:
-                    Keys keyCode = (Keys)m.WParam.ToInt32();
+                case WM_SYSKEYDOWN:
+                    keyCode = (Keys)m.WParam.ToInt32();
+#if DEBUG
+                    Debug.WriteLine("WM_SYSKEYDOWN：" + WM_SYSKEYDOWN);
+                    Debug.WriteLine("WM_SYSKEYDOWN-KeyCode：" + keyCode);
+#endif
                     switch (keyCode)
                     {
                         case Keys.Left:
-                            if (_cursorPosition > 0) _cursorPosition--;
+                            if (CursorByTxtIndex > 0) CursorByTxtIndex--;
                             Invalidate();
                             return true;// 返回true表示已处理该消息，不再传递给其他处理程序  
                         case Keys.Right:
-                            if (_cursorPosition < this._text.Length) _cursorPosition++;
+                            if (CursorByTxtIndex < this._text.Length) CursorByTxtIndex++;
                             Invalidate();
                             return true;
+                    }
+                    return true;
+                case WM_KEYDOWN:
+                    keyCode = (Keys)m.WParam.ToInt32();
+#if DEBUG
+                    Debug.WriteLine(WM_KEYDOWN);
+#endif
+                    switch (keyCode)
+                    {
                         case Keys.Back:
                             if (_selectionLength > 0 && _selectionLength < this._text.Length - _selectionStart)//删除选中
                             {
                                 this._text = this._text.Remove(_selectionStart, _selectionLength);
-                                _cursorPosition -= _selectionLength;
+                                CursorByTxtIndex -= _selectionLength;
                                 //Invalidate();
                                 Refresh();//即刻重绘
                                 ClearSelected();
                                 ClearSelected();//当选中文本后，再次输入时进行清空被选中内容
                             }
-                            else if (!string.IsNullOrEmpty(this._text))
+                            else if (!string.IsNullOrEmpty(this._text) && CursorByTxtIndex > 0)
                             {
-                                this._text = this._text.Remove(this._text.Length - 1, 1);
-                                _cursorPosition--;
+                                if (CursorByTxtIndex == this._text.Length)
+                                {
+                                    this._text = this._text.Remove(this._text.Length - 1, 1);
+                                    CursorByTxtIndex--;
+                                }
+                                else
+                                {
+                                    this._text = this._text.Remove(CursorByTxtIndex - 1, 1);
+                                    CursorByTxtIndex--;//保留光标位置
+                                }
                                 Invalidate();
                             }
                             return true;
@@ -424,14 +595,14 @@ namespace WinFormsApp2
                             if (_selectionLength > 0 && _selectionLength < this._text.Length - _selectionStart)//删除选中
                             {
                                 this._text = this._text.Remove(_selectionStart, _selectionLength);
-                                _cursorPosition -= _selectionLength;
+                                CursorByTxtIndex -= _selectionLength;
                                 //Invalidate();
                                 Refresh();//即刻重绘
                                 ClearSelected();//当选中文本后，再次输入时进行清空被选中内容
                             }
-                            else if (_cursorPosition < this._text.Length)
+                            else if (CursorByTxtIndex < this._text.Length)
                             {
-                                this._text = this._text.Remove(_cursorPosition, 1);
+                                this._text = this._text.Remove(CursorByTxtIndex, 1);
                                 Invalidate();
                             }
                             return true;
@@ -452,6 +623,12 @@ namespace WinFormsApp2
                             //Invalidate();
                             return true;
                     }
+                case WM_KEYUP:
+                    keyCode = (Keys)m.WParam.ToInt32();
+#if DEBUG
+                    Debug.WriteLine(WM_KEYUP);
+#endif
+                    break;
                 case WM_CHAR:
                     char _char = (char)m.WParam;
                     if (char.IsControl(_char))
@@ -469,7 +646,9 @@ namespace WinFormsApp2
                     //_text += str.ToString();
                     #endregion
 
-                    _cursorPosition++;
+                    CursorByTxtIndex = this.Text.Length;
+
+                    //Refresh();//即刻重绘
                     Invalidate(); //重新绘制控件，以触发OnPaint方法并显示文本  
                     return true;
                 default: break;
@@ -587,7 +766,8 @@ namespace WinFormsApp2
         /// <summary>
         /// 初始化选中
         /// </summary>
-        private void ClearSelected() {
+        private void ClearSelected()
+        {
             _firstSelectionStart = -1;
             _selectionStart = 0;
             _selectionLength = 0;
